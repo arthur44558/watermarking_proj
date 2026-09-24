@@ -401,19 +401,19 @@ Verify: - valid header - CRC verified - reconstructed watermark
 
 ## 15. Stage 1 completion checklist
 
--   [ ] Video input works.
--   [ ] Frame-by-frame processing works.
--   [ ] Existing JND-DCT engine is reused.
--   [ ] Output video is playable.
--   [ ] Resolution is preserved.
--   [ ] FPS is preserved.
--   [ ] Watermark is extractable.
--   [ ] CRC verification works.
--   [ ] Memory remains bounded.
--   [ ] Sequential CPU benchmark recorded.
--   [ ] Threaded CPU benchmark recorded.
--   [ ] Faster stable CPU configuration selected.
--   [ ] GPU is used only if benchmarking proves a real benefit.
+-   [x] Video input works.
+-   [x] Frame-by-frame processing works.
+-   [x] Existing JND-DCT engine is reused.
+-   [x] Output video is playable.
+-   [x] Resolution is preserved.
+-   [x] FPS is preserved.
+-   [x] Watermark is extractable.
+-   [x] CRC verification works.
+-   [x] Memory remains bounded.
+-   [x] Sequential CPU benchmark recorded.
+-   [x] Threaded CPU benchmark recorded.
+-   [x] Faster stable CPU configuration selected.
+-   [x] GPU is used only if benchmarking proves a real benefit.
 
 ## 16. Deliberately postponed
 

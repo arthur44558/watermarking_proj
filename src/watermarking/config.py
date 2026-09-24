@@ -59,6 +59,13 @@ MAX_PAYLOAD_BYTES = 1048576  # 1 MiB (1,048,576 bytes)
 MAX_WATERMARK_WIDTH = 1920
 MAX_WATERMARK_HEIGHT = 1200
 SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
+SUPPORTED_VIDEO_FORMATS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
+
+# Video processing configuration
+DEFAULT_VIDEO_FPS = 30.0
+VIDEO_SAMPLE_METRIC_COUNT = 5
+VIDEO_QUEUE_MAXSIZE = 8
+MAX_THREAD_WORKERS = 4
 
 # Watermark optimization thresholds
 MIN_WATERMARK_QUALITY = 25   # Minimum lossy encoding quality (WebP Q scale)

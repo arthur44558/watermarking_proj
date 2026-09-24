@@ -1,5 +1,5 @@
 /**
- * processing.js - Orchestrates backend API call, loading states, and timing.
+ * processing.js - Orchestrates backend API call, loading states, and timing for images and videos.
  */
 
 const Processing = (function () {
@@ -41,20 +41,27 @@ const Processing = (function () {
     const coverFile = Upload.getCoverFile();
     const wmFile = Upload.getWatermarkFile();
     const isExtractOnly = !wmFile;
+    const isVideo = Upload.isCoverVideo && Upload.isCoverVideo();
 
     if (!coverFile) {
-      alert("Please select a cover image.");
+      alert("Please select a cover image or video.");
       return;
     }
 
     // Set UI to processing
     setSystemStatus("processing");
     runBtn.disabled = true;
-    runBtnText.textContent = isExtractOnly ? "Extracting Watermark..." : "Embedding (DCT + JND)...";
+
+    if (isVideo) {
+      runBtnText.textContent = isExtractOnly ? "Extracting from Video..." : "Processing Video (DCT + JND)...";
+    } else {
+      runBtnText.textContent = isExtractOnly ? "Extracting Watermark..." : "Embedding (DCT + JND)...";
+    }
+
     runSpinner.textContent = "progress_activity";
     runSpinner.classList.add("animate-spin");
 
-    Results.setProcessingState(isExtractOnly);
+    Results.setProcessingState(isExtractOnly, isVideo);
     const startTime = performance.now();
 
     try {
@@ -62,6 +69,9 @@ const Processing = (function () {
       formData.append("cover_image", coverFile);
       if (wmFile) {
         formData.append("watermark_image", wmFile);
+      }
+      if (isVideo) {
+        formData.append("mode", "threaded");
       }
 
       const response = await fetch("/api/watermark", {
@@ -83,11 +93,19 @@ const Processing = (function () {
       // Success animation on button
       runSpinner.classList.remove("animate-spin");
       runSpinner.textContent = "check";
-      runBtnText.textContent = isExtractOnly ? "Watermark Extracted" : "Watermark Embedded";
+      if (isVideo) {
+        runBtnText.textContent = isExtractOnly ? "Watermark Extracted" : "Video Watermarked";
+      } else {
+        runBtnText.textContent = isExtractOnly ? "Watermark Extracted" : "Watermark Embedded";
+      }
 
       setTimeout(() => {
         runSpinner.textContent = "play_arrow";
-        runBtnText.textContent = isExtractOnly ? "Extract Watermark" : "Run Watermarking";
+        if (isVideo) {
+          runBtnText.textContent = isExtractOnly ? "Extract from Video" : "Watermark Video";
+        } else {
+          runBtnText.textContent = isExtractOnly ? "Extract Watermark" : "Run Watermarking";
+        }
         runBtn.disabled = false;
       }, 2000);
     } catch (err) {
@@ -97,7 +115,11 @@ const Processing = (function () {
 
       runSpinner.classList.remove("animate-spin");
       runSpinner.textContent = "play_arrow";
-      runBtnText.textContent = isExtractOnly ? "Extract Watermark" : "Run Watermarking";
+      if (isVideo) {
+        runBtnText.textContent = isExtractOnly ? "Extract from Video" : "Watermark Video";
+      } else {
+        runBtnText.textContent = isExtractOnly ? "Extract Watermark" : "Run Watermarking";
+      }
       runBtn.disabled = false;
     }
   }

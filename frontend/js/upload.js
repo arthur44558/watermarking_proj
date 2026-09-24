@@ -1,5 +1,6 @@
 /**
- * upload.js - Handles file selection, drag-and-drop, client-side preview, metadata, and dynamic capacity calculation.
+ * upload.js - Handles file selection, drag-and-drop, client-side preview, metadata,
+ * and dynamic capacity calculation for both Cover Images and Cover Videos.
  */
 
 const Upload = (function () {
@@ -7,6 +8,8 @@ const Upload = (function () {
   let watermarkFile = null;
   let coverImg = null;
   let wmImg = null;
+  let isCoverVideo = false;
+  let videoObjectUrl = null;
   let carrierCapacityBytes = 0;
   let estimatedPayloadBytes = 0;
 
@@ -14,6 +17,7 @@ const Upload = (function () {
   const coverInput = document.getElementById("coverFileInput");
   const wmInput = document.getElementById("wmFileInput");
   const coverCanvas = document.getElementById("coverCanvas");
+  const coverVideoPreview = document.getElementById("coverVideoPreview");
   const wmCanvas = document.getElementById("watermarkCanvas");
   const coverPlaceholder = document.getElementById("coverPlaceholder");
   const wmPlaceholder = document.getElementById("wmPlaceholder");
@@ -26,6 +30,8 @@ const Upload = (function () {
   const coverDims = document.getElementById("coverDims");
   const coverBadgeDims = document.getElementById("coverBadgeDims");
   const wmBadgeDims = document.getElementById("wmBadgeDims");
+  const coverCardTitle = document.getElementById("coverCardTitle");
+  const coverBadgeType = document.getElementById("coverBadgeType");
 
   // Dynamic watermark metadata elements
   const wmModeFormat = document.getElementById("wmModeFormat");
@@ -53,17 +59,21 @@ const Upload = (function () {
 
     if (coverFile && watermarkFile) {
       runBtn.disabled = false;
-      if (runBtnText) runBtnText.textContent = "Run Watermarking";
+      if (runBtnText) {
+        runBtnText.textContent = isCoverVideo ? "Watermark Video" : "Run Watermarking";
+      }
       if (activeModeBadge) {
-        activeModeBadge.textContent = "EMBED + VERIFY";
+        activeModeBadge.textContent = isCoverVideo ? "VIDEO EMBED" : "EMBED + VERIFY";
         activeModeBadge.className =
           "font-mono text-[9px] px-1.5 py-0.5 rounded font-semibold bg-primary-fixed text-primary border border-primary/20";
       }
     } else if (coverFile && !watermarkFile) {
       runBtn.disabled = false;
-      if (runBtnText) runBtnText.textContent = "Extract Watermark";
+      if (runBtnText) {
+        runBtnText.textContent = isCoverVideo ? "Extract from Video" : "Extract Watermark";
+      }
       if (activeModeBadge) {
-        activeModeBadge.textContent = "EXTRACT ONLY";
+        activeModeBadge.textContent = isCoverVideo ? "VIDEO EXTRACT" : "EXTRACT ONLY";
         activeModeBadge.className =
           "font-mono text-[9px] px-1.5 py-0.5 rounded font-semibold bg-secondary-container text-on-secondary-fixed border border-secondary/20";
       }
@@ -91,12 +101,13 @@ const Upload = (function () {
     const blocksW = Math.floor(w / 8);
     const totalBlocks = blocksH * blocksW;
 
-    // 16 bits (2 bytes) per block in Y (Luminance)
+    // 16 bits (2 bytes) per block in Y (Luminance) minus 32-byte header
     const yCapacityBytes = Math.max(0, totalBlocks * 2 - 32);
     carrierCapacityBytes = yCapacityBytes;
 
     if (carrierCapacity) {
-      carrierCapacity.textContent = `${formatBytes(yCapacityBytes)} (Luminance)`;
+      const suffix = isCoverVideo ? "(Luminance / frame)" : "(Luminance)";
+      carrierCapacity.textContent = `${formatBytes(yCapacityBytes)} ${suffix}`;
     }
 
     if (estimatedPayloadBytes > 0 && carrierCapacityBytes > 0) {
@@ -114,7 +125,9 @@ const Upload = (function () {
           wmUtilization.textContent = `${utilPercent}% (${formatBytes(estimatedPayloadBytes)} / ${formatBytes(carrierCapacityBytes)})`;
         }
         if (wmStatusHint) {
-          wmStatusHint.textContent = `Payload fits cleanly into carrier DCT capacity.`;
+          wmStatusHint.textContent = isCoverVideo
+            ? `Payload fits into frame DCT capacity. Redundantly embedded across all video frames.`
+            : `Payload fits cleanly into carrier DCT capacity.`;
         }
       }
     } else {
@@ -122,58 +135,136 @@ const Upload = (function () {
     }
   }
 
+  async function queryServerCapacity(file) {
+    try {
+      const formData = new FormData();
+      formData.append("cover_image", file);
+      const res = await fetch("/api/capacity", {
+        method: "POST",
+        body: formData,
+      });
+      const data = await res.json();
+      if (data.success && data.capacity) {
+        carrierCapacityBytes = data.capacity.usable_y_capacity_bytes;
+        updateCapacityDisplay();
+      }
+    } catch (err) {
+      console.warn("Could not query server capacity for cover media:", err);
+    }
+  }
+
   function handleCoverFile(file) {
-    if (!file || !file.type.startsWith("image/")) {
-      alert("Please select a valid image file for the cover image.");
+    if (!file) return;
+
+    const isVideo = file.type.startsWith("video/") || /\.(mp4|avi|mov|webm|mkv)$/i.test(file.name);
+    const isImage = file.type.startsWith("image/") || /\.(png|jpg|jpeg|webp|bmp)$/i.test(file.name);
+
+    if (!isVideo && !isImage) {
+      alert("Please select a valid image (PNG, JPG, WEBP) or video (MP4, AVI, MOV, WEBM) file for the cover.");
       return;
     }
+
     coverFile = file;
+    isCoverVideo = isVideo;
     coverFileName.textContent = file.name;
     coverFileSize.textContent = formatBytes(file.size);
+
+    if (coverCardTitle) coverCardTitle.textContent = isVideo ? "Cover Video" : "Cover Image";
+    if (coverBadgeType) coverBadgeType.textContent = isVideo ? "COVER VIDEO" : "COVER IMAGE";
 
     // Clear stale results on input change
     if (window.Results && Results.resetResults) {
       Results.resetResults();
     }
 
-    const reader = new FileReader();
-    reader.onload = function (e) {
-      const img = new Image();
-      img.onload = function () {
-        const w = img.naturalWidth || img.width;
-        const h = img.naturalHeight || img.height;
-        coverImg = img;
+    if (isVideo) {
+      // === VIDEO HANDLING ===
+      if (coverCanvas) coverCanvas.style.display = "none";
+      if (coverPlaceholder) coverPlaceholder.style.display = "none";
 
-        coverCanvas.width = w;
-        coverCanvas.height = h;
-        const ctx = coverCanvas.getContext("2d");
-        ctx.clearRect(0, 0, w, h);
-        ctx.drawImage(img, 0, 0);
+      if (videoObjectUrl) {
+        URL.revokeObjectURL(videoObjectUrl);
+      }
+      videoObjectUrl = URL.createObjectURL(file);
 
-        coverCanvas.style.display = "block";
-        coverPlaceholder.style.display = "none";
-        coverBadgeContainer.classList.remove("hidden");
-        coverBadgeContainer.classList.add("flex");
-        coverBadgeDims.textContent = `${w} × ${h} px`;
-        coverDims.textContent = `${w}×${h}`;
+      if (coverVideoPreview) {
+        coverVideoPreview.src = videoObjectUrl;
+        coverVideoPreview.style.display = "block";
+        coverVideoPreview.onloadedmetadata = function () {
+          const w = coverVideoPreview.videoWidth || 1280;
+          const h = coverVideoPreview.videoHeight || 720;
+          const dur = coverVideoPreview.duration ? coverVideoPreview.duration.toFixed(1) : "—";
+          coverImg = { naturalWidth: w, naturalHeight: h, width: w, height: h, isVideo: true };
 
-        const blocksH = Math.floor(h / 8);
-        const blocksW = Math.floor(w / 8);
-        const totalBlocks = blocksH * blocksW;
-        coverPartition.textContent = `8×8 (${totalBlocks.toLocaleString()} blks)`;
+          coverBadgeContainer.classList.remove("hidden");
+          coverBadgeContainer.classList.add("flex");
+          const ext = (file.name.split(".").pop() || "VID").toUpperCase();
+          coverBadgeDims.textContent = `${ext} • ${w} × ${h} px • ${dur}s`;
+          coverDims.textContent = `${w}×${h} (${dur}s)`;
 
-        updateCapacityDisplay();
+          const blocksH = Math.floor(h / 8);
+          const blocksW = Math.floor(w / 8);
+          const totalBlocks = blocksH * blocksW;
+          coverPartition.textContent = `8×8 (${totalBlocks.toLocaleString()} blks/frame)`;
 
-        // Forward to results original canvas
-        if (window.Results && Results.setOriginalPreview) {
-          Results.setOriginalPreview(img, w, h);
-        }
+          updateCapacityDisplay();
+          if (!isCoverVideo || file.size < 25 * 1024 * 1024) {
+            queryServerCapacity(file);
+          }
 
-        updateRunButtonState();
+          if (window.Results && Results.setOriginalPreview) {
+            Results.setOriginalPreview(videoObjectUrl, w, h, true);
+          }
+
+          updateRunButtonState();
+        };
+      }
+    } else {
+      // === IMAGE HANDLING ===
+      if (coverVideoPreview) {
+        coverVideoPreview.style.display = "none";
+        coverVideoPreview.pause();
+        coverVideoPreview.src = "";
+      }
+
+      const reader = new FileReader();
+      reader.onload = function (e) {
+        const img = new Image();
+        img.onload = function () {
+          const w = img.naturalWidth || img.width;
+          const h = img.naturalHeight || img.height;
+          coverImg = img;
+
+          coverCanvas.width = w;
+          coverCanvas.height = h;
+          const ctx = coverCanvas.getContext("2d");
+          ctx.clearRect(0, 0, w, h);
+          ctx.drawImage(img, 0, 0);
+
+          coverCanvas.style.display = "block";
+          coverPlaceholder.style.display = "none";
+          coverBadgeContainer.classList.remove("hidden");
+          coverBadgeContainer.classList.add("flex");
+          coverBadgeDims.textContent = `${w} × ${h} px`;
+          coverDims.textContent = `${w}×${h}`;
+
+          const blocksH = Math.floor(h / 8);
+          const blocksW = Math.floor(w / 8);
+          const totalBlocks = blocksH * blocksW;
+          coverPartition.textContent = `8×8 (${totalBlocks.toLocaleString()} blks)`;
+
+          updateCapacityDisplay();
+
+          if (window.Results && Results.setOriginalPreview) {
+            Results.setOriginalPreview(img, w, h, false);
+          }
+
+          updateRunButtonState();
+        };
+        img.src = e.target.result;
       };
-      img.src = e.target.result;
-    };
-    reader.readAsDataURL(file);
+      reader.readAsDataURL(file);
+    }
   }
 
   function handleWatermarkFile(file) {
@@ -210,7 +301,7 @@ const Upload = (function () {
         const ext = (file.name.split(".").pop() || "IMG").toUpperCase();
         wmBadgeDims.textContent = `${ext} • ${w} × ${h}`;
 
-        // Determine color mode by sampling image pixels
+        // Sample pixels to determine color mode
         let isGrayscale = true;
         try {
           const sampleData = ctx.getImageData(0, 0, Math.min(w, 64), Math.min(h, 64)).data;
@@ -231,7 +322,6 @@ const Upload = (function () {
         if (wmModeFormat) wmModeFormat.textContent = `${ext} • ${colorModeStr}`;
         if (wmDimensions) wmDimensions.textContent = `${w} × ${h} px`;
 
-        // Estimate compressed payload bytes from file size (PNG/JPEG already compressed)
         estimatedPayloadBytes = file.size;
         if (wmPayloadSize) {
           wmPayloadSize.textContent = `${formatBytes(file.size)} (raw/file)`;
@@ -287,12 +377,16 @@ const Upload = (function () {
     setupDragDrop(coverDropZone, handleCoverFile);
     setupDragDrop(wmDropZone, handleWatermarkFile);
 
-    // Lightbox click-to-zoom on preview zones when image is loaded
+    // Lightbox click-to-zoom on preview zones
     if (coverDropZone) {
-      coverDropZone.addEventListener("click", () => {
-        if (coverCanvas && coverCanvas.style.display !== "none") {
+      coverDropZone.addEventListener("click", (e) => {
+        if (e.target && e.target.tagName === "VIDEO") return;
+        if (isCoverVideo && videoObjectUrl) {
+          const title = coverFile ? `Cover Video: ${coverFile.name}` : "Cover Video (Input)";
+          if (window.Lightbox) Lightbox.open(videoObjectUrl, title, true);
+        } else if (coverCanvas && coverCanvas.style.display !== "none") {
           const title = coverFile ? `Cover Image: ${coverFile.name}` : "Cover Image (Input)";
-          if (window.Lightbox) Lightbox.open(coverCanvas.toDataURL(), title);
+          if (window.Lightbox) Lightbox.open(coverCanvas.toDataURL(), title, false);
         }
       });
     }
@@ -301,7 +395,7 @@ const Upload = (function () {
       wmDropZone.addEventListener("click", () => {
         if (wmCanvas && wmCanvas.style.display !== "none") {
           const title = watermarkFile ? `Watermark Image: ${watermarkFile.name}` : "Watermark Image (Input)";
-          if (window.Lightbox) Lightbox.open(wmCanvas.toDataURL(), title);
+          if (window.Lightbox) Lightbox.open(wmCanvas.toDataURL(), title, false);
         }
       });
     }
@@ -312,13 +406,24 @@ const Upload = (function () {
     watermarkFile = null;
     coverImg = null;
     wmImg = null;
+    isCoverVideo = false;
     carrierCapacityBytes = 0;
     estimatedPayloadBytes = 0;
+
+    if (videoObjectUrl) {
+      URL.revokeObjectURL(videoObjectUrl);
+      videoObjectUrl = null;
+    }
 
     if (coverInput) coverInput.value = "";
     if (wmInput) wmInput.value = "";
 
     if (coverCanvas) coverCanvas.style.display = "none";
+    if (coverVideoPreview) {
+      coverVideoPreview.style.display = "none";
+      coverVideoPreview.pause();
+      coverVideoPreview.src = "";
+    }
     if (wmCanvas) wmCanvas.style.display = "none";
     if (coverPlaceholder) coverPlaceholder.style.display = "flex";
     if (wmPlaceholder) wmPlaceholder.style.display = "flex";
@@ -332,7 +437,9 @@ const Upload = (function () {
       wmBadgeContainer.classList.remove("flex");
     }
 
-    if (coverFileName) coverFileName.textContent = "Select cover image...";
+    if (coverCardTitle) coverCardTitle.textContent = "Cover Media";
+    if (coverBadgeType) coverBadgeType.textContent = "COVER IMAGE / VIDEO";
+    if (coverFileName) coverFileName.textContent = "Select cover image or video...";
     if (wmFileName) wmFileName.textContent = "Select watermark image (optional)...";
     if (coverFileSize) coverFileSize.textContent = "—";
     if (coverPartition) coverPartition.textContent = "—";
@@ -353,6 +460,7 @@ const Upload = (function () {
     clearInputs,
     getCoverFile: () => coverFile,
     getWatermarkFile: () => watermarkFile,
+    isCoverVideo: () => isCoverVideo,
     hasValidInputs: () => !!coverFile,
     isExtractOnly: () => !watermarkFile,
   };

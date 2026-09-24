@@ -34,3 +34,6 @@ uploads/*
 .pytest_cache/
 .coverage
 htmlcov/
+
+# Subagent workspace metadata
+.agents/
