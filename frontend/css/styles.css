@@ -1,0 +1,70 @@
+/* Custom styling and layout refinements for JND Watermarking Studio */
+
+@layer base {
+  html, body {
+    margin: 0;
+    padding: 0;
+    height: 100%;
+  }
+}
+
+/* Aspect-ratio preserving preview containers */
+.preview-container {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  background-color: rgba(239, 244, 255, 0.7);
+  position: relative;
+  overflow: hidden;
+}
+
+.preview-container.clickable {
+  cursor: zoom-in;
+}
+
+.preview-container canvas,
+.preview-container img {
+  max-width: 100%;
+  max-height: 100%;
+  width: auto;
+  height: auto;
+  object-fit: contain;
+}
+
+/* Hover zoom hint indicator */
+.zoom-hint {
+  opacity: 0;
+  transition: opacity 0.15s ease-in-out;
+  pointer-events: none;
+}
+
+.preview-container:hover .zoom-hint {
+  opacity: 1;
+}
+
+/* Subtle transitions for overlays */
+.result-overlay {
+  transition: opacity 0.25s ease-in-out, visibility 0.25s ease-in-out;
+}
+
+.result-overlay.hidden {
+  opacity: 0;
+  pointer-events: none;
+  visibility: hidden;
+}
+
+/* Scrollbar polish */
+::-webkit-scrollbar {
+  width: 5px;
+  height: 5px;
+}
+::-webkit-scrollbar-track {
+  background: transparent;
+}
+::-webkit-scrollbar-thumb {
+  background: #cbd5e1;
+  border-radius: 4px;
+}
+::-webkit-scrollbar-thumb:hover {
+  background: #94a3b8;
+}
