@@ -130,6 +130,11 @@ Automatically adapts any watermark to fit carrier capacity:
 4. **Stage 3**: Progressive aspect-ratio-preserving downscaling (scales 0.9, 0.8... down to min dimension 32px) + quality search.
 5. **Stage 4**: Capacity deficit error with exact required/available byte counts if even minimum scale cannot fit.
 
+### 4.3 CRC32 Verification & Resilient Extraction (`enforce_crc`)
+Every 32-byte header stores a 32-bit CRC32 checksum computed over the compressed payload.
+- **Strict Verification (`enforce_crc=True`, Default)**: Validates payload integrity. If `actual_crc != expected_crc`, raises `ValueError("Payload integrity check failed: CRC32 mismatch...")`.
+- **Resilient Extraction (`enforce_crc=False`)**: When CRC checking is toggled off, `deserialize_watermark()` bypasses raising an exception. It records `crc_match: False`, populates `actual_crc`, `expected_crc`, and `crc_status: "CRC Mismatch (Enforcement Off)"`, and reconstructs/salvages the watermark image from available payload bytes. This allows users to inspect extracted watermarks even when minor bit noise or inter-frame compression alters the CRC.
+
 ---
 
 ## 5. Video Processing Architecture (`video.py`)
@@ -174,8 +179,10 @@ Stage 1 fastest video watermarking implementation adheres to strict memory safet
 
 ### 5.2 Multi-Frame Extraction & CRC32
 - Samples frames across the video at intervals (e.g. every 30 frames up to 10 samples).
-- Blindly reads the 32-byte header and verifies CRC32 checksum for each sampled frame.
-- Verifies payload consistency across all valid frames and reconstructs the watermark from the first verified frame.
+- Blindly reads the 32-byte header and validates CRC32 checksum for each sampled frame.
+- **`enforce_crc=True`**: Strictly accepts candidate frames whose CRC32 passes. Rejects corrupted frames from the candidate pool, ensuring `crc_status = "Passed (CRC32 Verified)"` and 100% bit fidelity.
+- **`enforce_crc=False`**: Accepts candidate frames even if CRC mismatches due to compression noise. Prioritizes candidate frames with valid CRC if available, sets `crc_status = "CRC Mismatch (Enforcement Off)"` when mismatch occurs, reconstructs the watermark image, and saves it to disk.
+- Verifies payload consistency across all accepted candidate frames.
 
 ### 5.3 Codec Fallback Chain & Web Compatibility
 Tests output codecs in order of pixel fidelity and browser compatibility:
@@ -251,6 +258,7 @@ Dual-mode endpoint for images and videos:
   - `cover_image` (File, Required): Image (`.png`, `.jpg`, `.webp`) OR Video (`.mp4`, `.avi`, `.mov`, `.webm`, `.mkv`).
   - `watermark_image` (File, Optional): Watermark image file. If omitted, triggers **Extract-Only Mode**.
   - `mode` (Text, Optional): For video, `"threaded"` (default) or `"sequential"`.
+  - `enforce_crc` (Text/Boolean, Optional): `"true"` (default) or `"false"`. When `"false"`, returns HTTP 200 with extracted watermark output and `crc_match: false` flags even if CRC32 check fails.
 - **Response (Video Embed Mode)**:
   ```json
   {
@@ -261,6 +269,9 @@ Dual-mode endpoint for images and videos:
     "watermarked_video_path": "C:\\path\\to\\output\\watermarked_video_a1b2c3d4.mp4",
     "extracted_watermark": "/output/extracted_video_wm_e5f6g7h8.png",
     "extracted_watermark_path": "C:\\path\\to\\output\\extracted_video_wm_e5f6g7h8.png",
+    "crc_status": "Passed (CRC32 Verified)",
+    "crc_match": true,
+    "enforce_crc": true,
     "video_info": {
       "width": 1280,
       "height": 720,
@@ -282,6 +293,8 @@ Dual-mode endpoint for images and videos:
     "extraction": {
       "status": "Success",
       "crc_status": "Passed (CRC32 Verified)",
+      "crc_match": true,
+      "enforce_crc": true,
       "valid_sampled_frames": 10,
       "total_sampled_frames": 10,
       "payload_consistent": true,
@@ -310,29 +323,31 @@ Dual-mode endpoint for images and videos:
 
 ## 8. Frontend Bento-Grid Interface
 
+- **Action Bar (Bento 3)**: Includes the interactive **Enforce CRC** toggle switch (`#enforceCrcToggle`, checked by default), processing execution trigger, and execution timer. When unchecked, sends `enforce_crc=false` to inspect candidate outputs even if CRC32 fails.
 - **Cover Section**: Supports drag-and-drop or browsing for both images and videos. Renders image canvas or HTML5 video preview with live duration, resolution, block count, and capacity display. Preserves intrinsic aspect ratio via `object-fit: contain`.
 - **Watermark Section**: Previews arbitrary watermark, calculates file size, samples grayscale/color mode, and displays real-time utilization against cover capacity.
 - **Results Section**:
   - Image outputs render on `<canvas id="outWatermarkedCanvas">`.
   - Video outputs render in `<video id="outWatermarkedVideo">` with playback controls.
   - Video Performance card displays stream resolution, average FPS throughput, peak RAM, and multi-frame CRC32 status.
-  - Extracted watermark renders in thumbnail with direct download button.
+  - Extracted watermark renders in `<canvas id="outExtractedCanvas">` even if CRC mismatches, with direct download button.
+  - Reconstructed pill (`#payloadMatchPill`) displays an amber badge (`bg-amber-100 text-amber-800 border-amber-300`) with `"CRC Mismatch"` or `"CRC Disabled"` when integrity fails or enforcement is turned off.
   - Lightbox modal enables full-resolution zoom for images and video player playback for videos.
 
 ---
 
 ## 9. Verification & Test Suite
 
-The test suite covers algorithmic robustness, video memory safety, universal aspect ratio/resolution support, and web integration:
+The test suite covers algorithmic robustness, video memory safety, universal aspect ratio/resolution support, CRC toggle resilience, and web integration:
 
 ```bash
-# Run full automated test suite
+# Run full automated test suite (67 passing tests)
 .venv\Scripts\python.exe -m pytest -v
 ```
 
-1. `tests/test_arbitrary_image_watermarking.py`: 10 comprehensive tests for arbitrary dimensions, grayscale, RGB, capacity checks, and extract-only mode.
+1. `tests/test_arbitrary_image_watermarking.py`: 12 comprehensive tests for arbitrary dimensions, grayscale, RGB, capacity checks, extract-only mode, CRC mismatch toggle behavior (`test_image_extraction_crc_mismatch_toggle`), and severe payload corruption salvage resilience (`test_image_extraction_severe_corruption_salvage`).
 2. `tests/test_embedding_robustness.py`: 5 randomized trials verifying 100.0% bit accuracy and 0 CRC32 errors.
 3. `tests/test_watermark_optimizer.py`: 5 tests for quality search, WebP compression, downscaling, and capacity rejection.
-4. `tests/test_web_api.py`: 4 tests for `/api/config`, `/api/capacity`, and `/api/watermark`.
-5. `tests/test_video_watermarking.py`: 8 tests for synthetic video generation, sequential and threaded processing, frame preservation, multi-frame extraction, memory stability, and video API routes.
+4. `tests/test_web_api.py`: 7 tests for `/api/config`, `/api/capacity`, `/api/watermark`, capacity deficit handling, UI progress bar & CRC toggle DOM verification, image CRC toggle API behavior, and video CRC toggle API behavior (`test_api_video_crc_toggle`).
+5. `tests/test_video_watermarking.py`: 9 tests for synthetic video generation, sequential and threaded processing, frame preservation, multi-frame extraction, memory stability, video API routes, and video CRC toggle verification (`test_video_extraction_crc_toggle`).
 6. `tests/test_universal_aspect_ratio_resolution.py`: Comprehensive test suite verifying all 15 aspects of universal aspect ratio & resolution support across images (16:9, 9:16, 1:1, 4:3, 21:9, odd/non-multiple-of-8), watermarks (landscape, portrait, banner, square), dynamic capacity calculation, boundary isolation, and video streaming.

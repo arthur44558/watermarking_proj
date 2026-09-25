@@ -15,6 +15,9 @@ document.addEventListener("DOMContentLoaded", () => {
     resetBtn.addEventListener("click", () => {
       Upload.clearInputs();
       Results.resetResults();
+      if (typeof Processing !== "undefined" && Processing.resetProgress) {
+        Processing.resetProgress();
+      }
       Processing.setSystemStatus("ready");
     });
   }

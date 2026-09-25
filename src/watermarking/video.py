@@ -287,6 +287,7 @@ def extract_video_watermark(
     output_dir: Union[Path, str] = OUTPUT_DIR,
     sample_interval: Optional[int] = None,
     max_samples: int = 10,
+    enforce_crc: bool = True,
 ) -> Dict[str, Any]:
     """
     Sample several frames across the video and extract the embedded watermark.
@@ -298,6 +299,7 @@ def extract_video_watermark(
         output_dir: Destination directory for the reconstructed watermark image.
         sample_interval: Optional step between sampled frames (e.g. 30).
         max_samples: Maximum number of frames to sample.
+        enforce_crc: If True, requires valid CRC32. If False, accepts frames even on mismatch.
 
     Returns:
         Extraction report dictionary with watermark image path, metadata, CRC status,
@@ -361,7 +363,7 @@ def extract_video_watermark(
 
             try:
                 extracted_payload = extract_framed_payload(frame)
-                reconstructed_wm, meta = deserialize_watermark(extracted_payload)
+                reconstructed_wm, meta = deserialize_watermark(extracted_payload, enforce_crc=enforce_crc)
                 valid_frames.append((f_idx, extracted_payload, reconstructed_wm, meta))
             except Exception as e:
                 failed_frames.append((f_idx, str(e)))
@@ -374,16 +376,27 @@ def extract_video_watermark(
         err_msg = failed_frames[0][1] if failed_frames else "No valid watermark detected in sampled frames."
         raise ValueError(f"Watermark extraction failed on all {len(sample_indices)} sampled frames: {err_msg}")
 
+    # Prioritize candidate frame with verified CRC if available
+    matching_frames = [f for f in valid_frames if f[3].get("crc_match", False)]
+    primary_frame = matching_frames[0] if matching_frames else valid_frames[0]
+    first_f_idx, first_payload, reconstructed_wm, meta = primary_frame
+
     # Check payload consistency across valid sampled frames
-    first_payload = valid_frames[0][1]
     all_consistent = all(p == first_payload for _, p, _, _ in valid_frames)
 
-    # Save the reconstructed watermark image from the first valid frame
-    first_f_idx, _, reconstructed_wm, meta = valid_frames[0]
+    # Save the reconstructed watermark image from the primary valid frame
     run_id = uuid.uuid4().hex[:8]
     extracted_filename = f"extracted_video_wm_{run_id}.png"
     extracted_file_path = output_path / extracted_filename
     save_image(extracted_file_path, reconstructed_wm)
+
+    crc_match = meta.get("crc_match", True)
+    if crc_match:
+        crc_status = "Passed (CRC32 Verified)"
+    elif not enforce_crc:
+        crc_status = "CRC Mismatch (Enforcement Off)"
+    else:
+        crc_status = meta.get("crc_status", "CRC Mismatch")
 
     return {
         "success": True,
@@ -392,7 +405,9 @@ def extract_video_watermark(
         "extracted_watermark": f"/output/{extracted_filename}",
         "extracted_watermark_path": str(extracted_file_path),
         "extraction_status": "Success",
-        "crc_status": "Passed (CRC32 Verified)",
+        "crc_status": crc_status,
+        "crc_match": crc_match,
+        "enforce_crc": enforce_crc,
         "valid_sampled_frames": len(valid_frames),
         "total_sampled_frames": len(sample_indices),
         "payload_consistent": all_consistent,
@@ -719,6 +734,7 @@ def watermark_video(
     mode: str = "threaded",
     max_workers: Optional[int] = None,
     progress_callback: Optional[Callable[[int, int, float, float], None]] = None,
+    enforce_crc: bool = True,
 ) -> Dict[str, Any]:
     """
     Execute full JND-guided DCT video watermarking pipeline:
@@ -852,12 +868,17 @@ def watermark_video(
         output_dir=output_path,
         sample_interval=None,
         max_samples=10,
+        enforce_crc=enforce_crc,
     )
 
     # 8. Watermark fidelity metrics
     # Compare target embedded watermark with extracted watermark
     target_wm = opt_wm_img
-    first_extracted_img, _ = deserialize_watermark(framed_payload)
+    extracted_payload_to_eval = ext_report.get("first_valid_payload", framed_payload)
+    try:
+        first_extracted_img, _ = deserialize_watermark(extracted_payload_to_eval, enforce_crc=enforce_crc)
+    except Exception:
+        first_extracted_img, _ = deserialize_watermark(framed_payload, enforce_crc=False)
     nc_wm = calculate_nc(target_wm, first_extracted_img)
     err_wm = calculate_watermark_reconstruction_error(target_wm, first_extracted_img)
 
@@ -866,7 +887,7 @@ def watermark_video(
         ext_bits = np.unpackbits(np.frombuffer(ext_report["first_valid_payload"], dtype=np.uint8))
         bit_acc = calculate_bit_accuracy(orig_bits, ext_bits)
     else:
-        bit_acc = 100.0 if ext_report["crc_status"] == "Passed (CRC32 Verified)" else 0.0
+        bit_acc = 100.0 if ext_report.get("crc_match", False) or ext_report["crc_status"] == "Passed (CRC32 Verified)" else 0.0
 
     watermarked_video_url = f"/output/{actual_output_file.name}"
 
@@ -879,6 +900,9 @@ def watermark_video(
         "watermarked_image": None,
         "extracted_watermark": ext_report["extracted_watermark"],
         "extracted_watermark_path": str(ext_report["extracted_watermark_path"]),
+        "crc_status": ext_report["crc_status"],
+        "crc_match": ext_report.get("crc_match", True),
+        "enforce_crc": enforce_crc,
         "video_info": {
             "width": width,
             "height": height,
@@ -900,6 +924,8 @@ def watermark_video(
         "extraction": {
             "status": ext_report["extraction_status"],
             "crc_status": ext_report["crc_status"],
+            "crc_match": ext_report.get("crc_match", True),
+            "enforce_crc": enforce_crc,
             "valid_sampled_frames": ext_report["valid_sampled_frames"],
             "total_sampled_frames": ext_report["total_sampled_frames"],
             "payload_consistent": ext_report["payload_consistent"],
@@ -923,6 +949,8 @@ def watermark_video(
             "watermark_height": int(wm_info["height"]),
             "watermark_format": wm_info["format"],
             "watermark_color_mode": wm_info["color_mode"],
+            "crc_match": ext_report.get("crc_match", True),
+            "crc_status": ext_report.get("crc_status", "Passed (CRC32 Verified)"),
             "raw_payload_bytes": int(wm_info["raw_bytes"]),
             "compressed_payload_bytes": int(wm_info["compressed_bytes"]),
             "total_payload_bytes": int(len(framed_payload)),

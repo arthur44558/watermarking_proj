@@ -324,6 +324,51 @@ def test_flask_api_video_watermarking():
         assert ext_json["extraction"]["status"] == "Success"
 
 
+def test_video_extraction_crc_toggle():
+    """Verify video extraction with CRC toggle on (enforce_crc=True) and off (enforce_crc=False)."""
+    with tempfile.TemporaryDirectory() as tmp_dir:
+        tmp_path = Path(tmp_dir)
+        vid_file = tmp_path / "crc_toggle_vid.mp4"
+        actual_vid = generate_synthetic_video(vid_file, width=320, height=240, fps=25.0, num_frames=10)
+        wm = create_synthetic_watermark(width=24, height=16)
+
+        # 1. Standard watermark_video with enforce_crc=False propagated
+        res = watermark_video(actual_vid, wm, output_dir=tmp_path / "out", mode="sequential", enforce_crc=False)
+        assert res["success"] is True
+        assert res["enforce_crc"] is False
+        assert res["crc_match"] is True
+        assert res["extraction"]["crc_status"] == "Passed (CRC32 Verified)"
+
+        # 2. Build corrupted video frames where CRC mismatches
+        from watermarking.payload import serialize_watermark
+        from watermarking.embedding import embed_image_payload
+        payload = serialize_watermark(wm, channels_used=1)
+        corrupted_byte = bytes([payload[35] ^ 0xFF])
+        bad_payload = payload[:35] + corrupted_byte + payload[36:]
+
+        corrupt_vid_base = tmp_path / "corrupt_vid"
+        writer, corrupt_vid_path, _ = create_video_writer(corrupt_vid_base, 320, 240, 25.0)
+        try:
+            for _ in range(5):
+                frame = np.full((240, 320, 3), 120, dtype=np.uint8)
+                bad_frame, _ = embed_image_payload(frame, bad_payload, channels_used=1)
+                writer.write(bad_frame)
+        finally:
+            writer.release()
+
+        # 3. With enforce_crc=True, extract_video_watermark must raise ValueError
+        with pytest.raises(ValueError, match="Watermark extraction failed|CRC32 mismatch|corrupted"):
+            extract_video_watermark(corrupt_vid_path, output_dir=tmp_path / "out", enforce_crc=True)
+
+        # 4. With enforce_crc=False, extract_video_watermark must succeed and show CRC mismatch
+        ext = extract_video_watermark(corrupt_vid_path, output_dir=tmp_path / "out", enforce_crc=False)
+        assert ext["extraction_status"] == "Success"
+        assert ext["crc_match"] is False
+        assert "mismatch" in ext["crc_status"].lower()
+        assert ext["enforce_crc"] is False
+        assert Path(ext["extracted_watermark_path"]).exists()
+
+
 if __name__ == "__main__":
     tests = [
         test_video_info_and_capacity,
@@ -334,6 +379,7 @@ if __name__ == "__main__":
         test_video_capacity_deficit,
         test_benchmark_utility,
         test_flask_api_video_watermarking,
+        test_video_extraction_crc_toggle,
     ]
     passed = 0
     failed = 0

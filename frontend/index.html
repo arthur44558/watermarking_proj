@@ -254,6 +254,10 @@
           </div>
         </div>
         <div class="flex items-center gap-2 shrink-0">
+          <label class="inline-flex items-center gap-1.5 cursor-pointer px-2 py-1 rounded bg-surface-container-low hover:bg-surface-container border border-slate-200 transition-colors select-none" title="Toggle CRC32 payload checksum verification (uncheck to accept candidate frames with CRC mismatch)">
+            <input type="checkbox" id="enforceCrcToggle" class="rounded border-slate-300 text-primary focus:ring-primary h-3.5 w-3.5 cursor-pointer accent-primary" checked>
+            <span class="text-[11px] font-mono font-medium text-on-surface" id="crcToggleLabel">Enforce CRC</span>
+          </label>
           <span class="hidden md:inline-flex items-center gap-1 font-mono text-[10px] text-on-surface-variant" id="executionTimer">
             <span class="material-symbols-outlined text-[13px] text-primary">schedule</span>
             Standby
@@ -262,6 +266,32 @@
             <span class="material-symbols-outlined text-[16px]" id="runSpinner">play_arrow</span>
             <span id="runBtnText">Run Watermarking</span>
           </button>
+        </div>
+      </div>
+
+      <!-- Bento 3.1: Active Processing Progress Card (Hidden by default) -->
+      <div id="processingProgressCard" class="hidden bg-surface-container-lowest border border-primary/30 rounded-xl p-3 shadow-sm flex flex-col gap-2 shrink-0 transition-all duration-300">
+        <div class="flex items-center justify-between gap-2">
+          <div class="flex items-center gap-2 min-w-0">
+            <span class="material-symbols-outlined text-[18px] text-primary animate-spin shrink-0" id="progressIcon">progress_activity</span>
+            <span class="font-semibold text-xs text-on-surface truncate" id="progressTitle">Processing Media...</span>
+          </div>
+          <div class="flex items-center gap-2 font-mono text-[10px] shrink-0">
+            <span class="font-mono text-[9px] px-1.5 py-0.5 rounded bg-surface-container text-on-surface-variant border border-slate-200" id="progressStageBadge">Stage 1/4</span>
+            <span class="text-secondary" id="progressTimer">0.0s elapsed</span>
+            <span class="px-2 py-0.5 rounded font-bold bg-primary-fixed text-primary text-[10px]" id="progressPercentBadge">0%</span>
+          </div>
+        </div>
+
+        <!-- Main Progress Bar Track -->
+        <div class="w-full bg-surface-container-high rounded-full h-2.5 overflow-hidden p-0.5 border border-slate-200/60 shadow-inner">
+          <div id="progressBarFill" class="h-full bg-primary rounded-full transition-all duration-150 ease-out relative overflow-hidden progress-bar-shimmer" style="width: 0%;"></div>
+        </div>
+
+        <!-- Progress Step & Details -->
+        <div class="flex items-center justify-between text-[10px] font-mono text-on-surface-variant">
+          <span class="text-primary font-medium truncate flex-1 mr-2" id="progressStepText">Initializing perceptual pipeline...</span>
+          <span class="text-secondary truncate shrink-0" id="progressSubDetail">Color-space conversion</span>
         </div>
       </div>
 
@@ -396,9 +426,13 @@
               <div class="relative w-full min-h-[160px] max-h-[220px] flex items-center justify-center p-2 bg-slate-900/5 rounded-lg border border-slate-200/60 overflow-hidden preview-container group cursor-pointer" id="outWatermarkedContainer" title="Click to enlarge">
                 <canvas class="max-w-full max-h-full object-contain rounded shadow-xs" id="outWatermarkedCanvas" width="256" height="256"></canvas>
                 <video class="max-w-full max-h-full object-contain rounded shadow-xs hidden" id="outWatermarkedVideo" controls playsinline></video>
-                <div class="absolute inset-0 bg-surface/90 backdrop-blur-xs flex flex-col items-center justify-center gap-1.5 transition-opacity duration-200 result-overlay" id="watermarkResultOverlay">
+                <div class="absolute inset-0 bg-surface/90 backdrop-blur-xs flex flex-col items-center justify-center gap-2 p-3 transition-opacity duration-200 result-overlay" id="watermarkResultOverlay">
                   <span class="material-symbols-outlined text-[22px] text-secondary" id="wmOverlayIcon">hourglass_empty</span>
-                  <span class="text-[10px] font-mono text-secondary font-medium" id="wmOverlayText">Awaiting Processing</span>
+                  <span class="text-[10px] font-mono text-secondary font-medium text-center" id="wmOverlayText">Awaiting Processing</span>
+                  <div class="w-36 max-w-[85%] bg-surface-container-high rounded-full h-1.5 overflow-hidden hidden" id="overlayProgressContainer">
+                    <div id="overlayProgressBarFill" class="h-full bg-primary rounded-full transition-all duration-150 ease-out" style="width: 0%;"></div>
+                  </div>
+                  <span class="text-[9px] font-mono text-primary font-semibold hidden" id="overlayProgressPercent">0%</span>
                 </div>
                 <div class="absolute top-1.5 right-1.5 bg-inverse-surface/70 text-inverse-on-surface px-1.5 py-0.5 rounded font-mono text-[9px] items-center gap-1 backdrop-blur-xs zoom-hint hidden group-hover:flex">
                   <span class="material-symbols-outlined text-[12px]">zoom_in</span>
@@ -581,8 +615,8 @@
   <!-- Application Modular Scripts -->
   <script src="/js/lightbox.js"></script>
   <script src="/js/results.js"></script>
-  <script src="/js/upload.js"></script>
   <script src="/js/processing.js"></script>
+  <script src="/js/upload.js"></script>
   <script src="/js/app.js"></script>
 </body>
 </html>

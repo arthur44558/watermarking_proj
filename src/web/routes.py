@@ -82,6 +82,13 @@ def run_watermarking():
             if len(wm_bytes) > 0:
                 has_watermark = True
 
+    # Check for enforce_crc toggle
+    enforce_crc_val = request.form.get("enforce_crc", "true")
+    if isinstance(enforce_crc_val, bool):
+        enforce_crc = enforce_crc_val
+    else:
+        enforce_crc = str(enforce_crc_val).strip().lower() in ("true", "1", "yes")
+
     try:
         if is_video:
             # === Video Watermarking Branch ===
@@ -101,12 +108,14 @@ def run_watermarking():
                         wm_bytes,
                         output_dir=OUTPUT_DIR,
                         mode=video_mode,
+                        enforce_crc=enforce_crc,
                     )
                 else:
                     # Mode B: Extract Existing Watermark from Video
                     ext_result = extract_video_watermark(
                         temp_video_path,
                         output_dir=OUTPUT_DIR,
+                        enforce_crc=enforce_crc,
                     )
                     # Copy input video to output so it can be referenced in UI
                     input_copy_path = OUTPUT_DIR / f"input_video_{run_id}{safe_ext}"
@@ -124,9 +133,14 @@ def run_watermarking():
                         "watermarked_video": video_url,
                         "watermarked_image": None,
                         "extracted_watermark": ext_result["extracted_watermark"],
+                        "crc_status": ext_result.get("crc_status", "Passed (CRC32 Verified)"),
+                        "crc_match": ext_result.get("crc_match", True),
+                        "enforce_crc": enforce_crc,
                         "extraction": {
                             "status": ext_result["extraction_status"],
                             "crc_status": ext_result["crc_status"],
+                            "crc_match": ext_result.get("crc_match", True),
+                            "enforce_crc": enforce_crc,
                             "valid_sampled_frames": ext_result["valid_sampled_frames"],
                             "total_sampled_frames": ext_result["total_sampled_frames"],
                             "payload_consistent": ext_result["payload_consistent"],
@@ -148,6 +162,8 @@ def run_watermarking():
                             "watermark_width": ext_result["watermark_metadata"]["width"],
                             "watermark_height": ext_result["watermark_metadata"]["height"],
                             "watermark_color_mode": ext_result["watermark_metadata"]["color_mode"],
+                            "crc_match": ext_result.get("crc_match", True),
+                            "crc_status": ext_result.get("crc_status", "Passed (CRC32 Verified)"),
                             "compressed_payload_bytes": ext_result["watermark_metadata"]["compressed_payload_bytes"],
                             "total_payload_bytes": ext_result["watermark_metadata"]["total_payload_bytes"],
                             "channels_used": ext_result["watermark_metadata"]["channels_used"],
@@ -180,11 +196,11 @@ def run_watermarking():
 
             if has_watermark:
                 # Mode A: Embed and Verify
-                result = watermark_image(cover_bytes, wm_bytes)
+                result = watermark_image(cover_bytes, wm_bytes, enforce_crc=enforce_crc)
                 result["media_type"] = "image"
             else:
                 # Mode B: Extract Existing Watermark
-                result = extract_only(cover_bytes)
+                result = extract_only(cover_bytes, enforce_crc=enforce_crc)
                 result["media_type"] = "image"
 
             return jsonify(result), 200

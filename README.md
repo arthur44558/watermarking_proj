@@ -9,7 +9,7 @@
 An imperceptible, robust, and blind media watermarking system based on 2D Discrete Cosine Transform (DCT) and activity-based Just Noticeable Difference (JND) perceptual masking. Supports:
 - **Universal Aspect Ratio & Resolution Support**: Full dynamic adaptation for arbitrary cover dimensions and aspect ratios (16:9, 9:16 portrait, 1:1, 4:3, 21:9 ultrawide, odd/non-multiple-of-8 like 1279×719) with strict output dimension preservation and zero stretching or letterboxing.
 - **Arbitrary Image Watermarking**: Arbitrary cover dimensions and watermark images (PNG, JPG, WebP; Grayscale or RGB; up to 1920×1200, 1 MiB envelope) with 100% blind reconstruction and aspect-ratio-preserving proportional downscaling.
-- **Fastest Memory-Safe Video Watermarking**: Frame-by-frame processing of MP4/AVI/MOV/WEBM video streams without uncontrolled memory usage, bounded multithreaded worker pools, and multi-frame sampling extraction with CRC32 verification.
+- **Fastest Memory-Safe Video Watermarking**: Frame-by-frame processing of MP4/AVI/MOV/WEBM video streams without uncontrolled memory usage, bounded multithreaded worker pools, multi-frame sampling extraction with CRC32 verification, and interactive CRC enforcement toggle for resilient candidate payload inspection.
 
 ---
 
@@ -116,19 +116,26 @@ Each $8 \times 8$ block embeds **16 bits** across 16 symmetric mid-to-high frequ
 After inverse DCT, pixel values are rounded to integers and clipped to $[0, 255]$. To prevent edge-pixel rounding errors across 16 simultaneous coefficient modifications, a local refinement loop tests forward DCT on the quantized uint8 block; if any bit would flip due to clipping, the margin is adaptively boosted (up to 4 passes), guaranteeing **100.0% error-free bit recovery**.
 
 ### 3.5 Framing Protocol & Blind Extraction
-The payload begins with a 24-byte header packed into the first 12 blocks of the Y channel:
+The payload begins with a 32-byte header packed into the first 16 blocks of the Y channel:
 - `MAGIC`: 4 bytes (`b"JNDW"`)
-- `VERSION`: 1 byte (`0x01`)
+- `VERSION`: 1 byte (`0x02`)
 - `CHANNELS_USED`: 1 byte (`0x01` for Y only, `0x03` for YCrCb)
-- `COLOR_MODE`: 1 byte (`0x01` for Grayscale, `0x03` for RGB)
-- `BIT_DEPTH`: 1 byte (`8`)
-- `WIDTH`: 2 bytes uint16
-- `HEIGHT`: 2 bytes uint16
+- `COLOR_MODE`: 1 byte (`0x00` for Grayscale, `0x01` for RGB)
+- `CODEC`: 1 byte (`0x00` for RAW_ZLIB, `0x01` for WebP, `0x02` for JPEG)
+- `QUALITY`: 1 byte (`0` to `100`)
+- `RESERVED`: 1 byte (`0x00`)
+- `ORIGINAL_WIDTH`, `ORIGINAL_HEIGHT`: 2 × uint16
+- `OPTIMIZED_WIDTH`, `OPTIMIZED_HEIGHT`: 2 × uint16
 - `ORIGINAL_BYTES`: 4 bytes uint32
 - `COMPRESSED_BYTES`: 4 bytes uint32
-- `CRC32`: 4 bytes uint32
+- `CRC32`: 4 bytes uint32 checksum over compressed payload
+- `RESERVED`: 2 bytes uint16
 
-The decoder blindly reads the 24-byte header, determines total compressed bytes and channel distribution, extracts the remaining bitstream in raster order, verifies the CRC32 checksum, decompresses via zlib, and reconstructs the watermark at original resolution and color mode.
+The decoder blindly reads the 32-byte header, determines total compressed bytes and channel distribution, extracts the remaining bitstream in raster order, verifies the CRC32 checksum, decompresses via zlib/WebP, and reconstructs the watermark at original resolution and color mode.
+
+### 3.6 CRC32 Verification & Resilient Extraction (`enforce_crc`)
+- **Strict Verification (`enforce_crc=True`, Default)**: Guarantees full bitstream integrity. Any single-bit corruption or CRC32 mismatch raises a validation error.
+- **Resilient Extraction (`enforce_crc=False`)**: When CRC checking is toggled off in the UI or API (`enforce_crc=false`), the extraction engine attempts best-effort decompression and reconstruction. The UI and API return the candidate watermark visual, alongside explicit flags `crc_match: false`, `enforce_crc: false`, and `crc_status: "CRC Mismatch (Enforcement Off)"` so users can inspect recovered watermarks even if transmission noise modified non-critical payload bits.
 
 ---
 
@@ -161,6 +168,7 @@ The decoder blindly reads the 24-byte header, determines total compressed bytes 
   * `cover_image`: Cover media file (Image `.png`/`.jpg`/`.webp`/`.bmp` OR Video `.mp4`/`.avi`/`.mov`/`.webm`)
   * `watermark_image`: Watermark image file (Optional; omit for Extract-Only mode)
   * `mode`: Optional processing mode for videos: `"sequential"` or `"threaded"` (default: `"threaded"`)
+  * `enforce_crc`: Optional boolean form string: `"true"` or `"false"` (default: `"true"`). When `"false"`, CRC32 checksum mismatch does not raise an error; the candidate payload is reconstructed and returned with `crc_match: false` and `crc_status: "CRC Mismatch (Enforcement Off)"`.
 * **Response** (`200 OK` - Mode A: Embed & Verify - Image):
   ```json
   {
@@ -170,6 +178,9 @@ The decoder blindly reads the 24-byte header, determines total compressed bytes 
     "watermarked_image": "/output/watermarked_3109ed23.png",
     "extracted_watermark": "/output/extracted_3109ed23.png",
     "difference_image": "/output/difference_3109ed23.png",
+    "crc_status": "Passed (CRC32 Verified)",
+    "crc_match": true,
+    "enforce_crc": true,
     "metrics": {
       "psnr": 54.12,
       "ssim": 0.9996,
@@ -189,6 +200,9 @@ The decoder blindly reads the 24-byte header, determines total compressed bytes 
     "media_type": "video",
     "watermarked_video": "/output/watermarked_video_3109ed23.mp4",
     "extracted_watermark": "/output/extracted_video_wm_3109ed23.png",
+    "crc_status": "Passed (CRC32 Verified)",
+    "crc_match": true,
+    "enforce_crc": true,
     "video_info": {
       "width": 1920,
       "height": 1080,
@@ -236,10 +250,12 @@ The decoder blindly reads the 24-byte header, determines total compressed bytes 
 .venv\Scripts\python.exe -m pytest -v
 ```
 
-1. **`tests/test_arbitrary_image_watermarking.py`** (10 tests): Full roundtrip grayscale/RGB embedding, odd carrier resolutions, capacity limits, extract-only.
+The test suite contains **67 comprehensive automated tests** across 6 modules:
+
+1. **`tests/test_arbitrary_image_watermarking.py`** (12 tests): Full roundtrip grayscale/RGB embedding, odd carrier resolutions, capacity limits, extract-only, CRC mismatch toggle tolerance, and severe corruption salvage resilience.
 2. **`tests/test_embedding_robustness.py`** (5 tests): Multi-trial randomized color covers, guaranteeing 100% bit accuracy and 0 CRC32 errors.
 3. **`tests/test_watermark_optimizer.py`** (5 tests): Dynamic downscaling, WebP/raw compression, quality search.
-4. **`tests/test_web_api.py`** (4 tests): Flask HTTP routes (`/api/capacity`, `/api/watermark`, `/api/config`).
-5. **`tests/test_video_watermarking.py`** (8 tests): Sequential/threaded frame streaming, memory stability (RSS bounded), multi-frame CRC32 verification, benchmark utilities, and web video API endpoints.
-6. **`tests/test_universal_aspect_ratio_resolution.py`**: Comprehensive verification of Universal Aspect Ratio & Resolution Support covering 16:9, 9:16 portrait, 1:1, 4:3, 21:9 ultrawide, odd/non-multiple-of-8 (e.g. 1279×719, 501×333, 243×163) images and videos, watermark proportional aspect-ratio downscaling, and boundary padding isolation.
+4. **`tests/test_web_api.py`** (7 tests): Flask HTTP routes (`/api/capacity`, `/api/watermark`, `/api/config`), DOM elements, image API CRC toggle handling, and video API CRC toggle handling.
+5. **`tests/test_video_watermarking.py`** (9 tests): Sequential/threaded frame streaming, memory stability (RSS bounded), multi-frame CRC32 verification, benchmark utilities, web video API endpoints, and multi-frame video extraction CRC toggle.
+6. **`tests/test_universal_aspect_ratio_resolution.py`** (29 tests): Comprehensive verification of Universal Aspect Ratio & Resolution Support covering 16:9, 9:16 portrait, 1:1, 4:3, 21:9 ultrawide, odd/non-multiple-of-8 (e.g. 1279×719, 501×333, 243×163) images and videos, watermark proportional aspect-ratio downscaling, and boundary padding isolation.
 

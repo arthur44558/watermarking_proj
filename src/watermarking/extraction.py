@@ -128,6 +128,8 @@ def extract_framed_payload(watermarked_bgr: np.ndarray) -> bytes:
     comp_len = meta["compressed_len"]
     channels_used = meta["channels_used"]
     total_payload_bytes = HEADER_SIZE_BYTES + comp_len
+    max_carrier_bytes = (y_capacity_bits * (3 if channels_used > 1 else 1)) // 8
+    total_payload_bytes = min(total_payload_bytes, max_carrier_bytes)
     total_payload_bits = total_payload_bytes * 8
 
     # 3. Extract remaining payload bits
@@ -163,17 +165,23 @@ def extract_framed_payload(watermarked_bgr: np.ndarray) -> bytes:
     return bytes(payload_bytes)
 
 
-def extract_and_reconstruct(watermarked_bgr: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
+def extract_and_reconstruct(
+    watermarked_bgr: np.ndarray, enforce_crc: bool = True
+) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     Blindly extract and losslessly reconstruct the embedded watermark image.
     Does not require the original watermark.
 
+    Args:
+        watermarked_bgr: Watermarked BGR image array.
+        enforce_crc: If True, raises ValueError on CRC32 mismatch. Default True.
+
     Returns:
         reconstructed_image: 2D (Grayscale) or 3D (RGB) uint8 image with original dimensions.
-        metadata: Dictionary with extracted dimensions, format, compression ratio, etc.
+        metadata: Dictionary with extracted dimensions, format, CRC status, etc.
     """
     payload_bytes = extract_framed_payload(watermarked_bgr)
-    reconstructed_wm, meta = deserialize_watermark(payload_bytes)
+    reconstructed_wm, meta = deserialize_watermark(payload_bytes, enforce_crc=enforce_crc)
     return reconstructed_wm, meta
 
 

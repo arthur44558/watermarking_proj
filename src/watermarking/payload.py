@@ -186,7 +186,7 @@ def unpack_header(header_bytes: bytes) -> Dict[str, Any]:
     }
 
 
-def deserialize_watermark(payload_bytes: bytes) -> Tuple[np.ndarray, Dict[str, Any]]:
+def deserialize_watermark(payload_bytes: bytes, enforce_crc: bool = True) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     Deserialize, validate CRC32, decompress/decode, and reconstruct the watermark image.
 
@@ -195,45 +195,81 @@ def deserialize_watermark(payload_bytes: bytes) -> Tuple[np.ndarray, Dict[str, A
 
     Args:
         payload_bytes: Complete framed payload (Header + Compressed Data).
+        enforce_crc: If True, raises ValueError when CRC32 fails. If False,
+            records CRC mismatch in metadata and attempts reconstruction.
 
     Returns:
         reconstructed_image: 2D (Grayscale) or 3D (RGB/BGR) uint8 numpy array.
-        metadata: Dictionary containing parsed header metadata.
+        metadata: Dictionary containing parsed header metadata and CRC verification status.
     """
     meta = unpack_header(payload_bytes)
     comp_len = meta["compressed_len"]
     orig_len = meta["original_len"]
-    color_mode = meta["color_mode_code"]
+    color_mode = 0 if meta["color_mode_code"] == 0 else 1
     codec = meta["codec"]
-    w = meta["width"]
-    h = meta["height"]
+    w = min(MAX_WATERMARK_WIDTH, max(1, meta["width"]))
+    h = min(MAX_WATERMARK_HEIGHT, max(1, meta["height"]))
     expected_crc = meta["crc32"]
 
     total_expected = HEADER_SIZE_BYTES + comp_len
     if len(payload_bytes) < total_expected:
-        raise ValueError(
-            f"Truncated payload: expected {total_expected} bytes, received {len(payload_bytes)} bytes."
-        )
+        if enforce_crc:
+            raise ValueError(
+                f"Truncated payload: expected {total_expected} bytes, received {len(payload_bytes)} bytes."
+            )
+        compressed_data = payload_bytes[HEADER_SIZE_BYTES:]
+    else:
+        compressed_data = payload_bytes[HEADER_SIZE_BYTES : total_expected]
 
-    compressed_data = payload_bytes[HEADER_SIZE_BYTES : total_expected]
     actual_crc = binascii.crc32(compressed_data) & 0xFFFFFFFF
+    crc_match = (actual_crc == expected_crc)
+    meta["crc_match"] = crc_match
+    meta["actual_crc"] = int(actual_crc)
+    meta["expected_crc"] = int(expected_crc)
+    meta["crc_status"] = (
+        "Passed (CRC32 Verified)"
+        if crc_match
+        else f"CRC Mismatch (expected {hex(expected_crc)}, got {hex(actual_crc)})"
+    )
 
-    if actual_crc != expected_crc:
+    if enforce_crc and not crc_match:
         raise ValueError(
             f"Payload integrity check failed: CRC32 mismatch (expected {hex(expected_crc)}, got {hex(actual_crc)}). "
             f"The embedded watermark data is corrupted."
         )
 
     if codec == CODEC_RAW_ZLIB:
-        raw_bytes = zlib.decompress(compressed_data)
-        if len(raw_bytes) != orig_len:
-            raise ValueError(
-                f"Decompressed byte length mismatch: expected {orig_len} bytes, got {len(raw_bytes)} bytes."
+        raw_bytes = None
+        try:
+            raw_bytes = zlib.decompress(compressed_data)
+        except Exception:
+            # Salvage partial decompression if possible
+            try:
+                d = zlib.decompressobj()
+                raw_bytes = d.decompress(compressed_data)
+            except Exception:
+                raw_bytes = b""
+
+        expected_shape_bytes = h * w * (1 if color_mode == 0 else 3)
+        if raw_bytes is None:
+            raw_bytes = b"\x00" * expected_shape_bytes
+        elif len(raw_bytes) < expected_shape_bytes:
+            raw_bytes = raw_bytes + b"\x00" * (expected_shape_bytes - len(raw_bytes))
+        elif len(raw_bytes) > expected_shape_bytes:
+            raw_bytes = raw_bytes[:expected_shape_bytes]
+
+        try:
+            if color_mode == 0:
+                reconstructed = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((h, w)).copy()
+            else:
+                reconstructed = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((h, w, 3)).copy()
+        except Exception:
+            reconstructed = (
+                np.zeros((h, w), dtype=np.uint8)
+                if color_mode == 0
+                else np.zeros((h, w, 3), dtype=np.uint8)
             )
-        if color_mode == 0:
-            reconstructed = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((h, w)).copy()
-        else:
-            reconstructed = np.frombuffer(raw_bytes, dtype=np.uint8).reshape((h, w, 3)).copy()
+
     elif codec in (CODEC_WEBP, CODEC_JPEG):
         nparr = np.frombuffer(compressed_data, np.uint8)
         if color_mode == 0:
@@ -241,9 +277,19 @@ def deserialize_watermark(payload_bytes: bytes) -> Tuple[np.ndarray, Dict[str, A
         else:
             reconstructed = cv2.imdecode(nparr, cv2.IMREAD_COLOR)
         if reconstructed is None:
-            raise ValueError(f"Failed to decode embedded {meta['codec_name']} watermark data.")
+            if color_mode == 0:
+                reconstructed = np.zeros((h, w), dtype=np.uint8)
+            else:
+                reconstructed = np.zeros((h, w, 3), dtype=np.uint8)
+        elif reconstructed.shape[:2] != (h, w):
+            reconstructed = cv2.resize(reconstructed, (w, h), interpolation=cv2.INTER_NEAREST)
     else:
-        raise ValueError(f"Unknown codec identifier in header: {codec}")
+        if enforce_crc:
+            raise ValueError(f"Unknown codec identifier in header: {codec}")
+        if color_mode == 0:
+            reconstructed = np.zeros((h, w), dtype=np.uint8)
+        else:
+            reconstructed = np.zeros((h, w, 3), dtype=np.uint8)
 
     return reconstructed, meta
 

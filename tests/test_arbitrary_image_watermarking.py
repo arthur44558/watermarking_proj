@@ -213,6 +213,57 @@ def test_real_files_roundtrip():
     assert ext_result["metadata"]["watermark_height"] == result["metadata"]["watermark_height"]
 
 
+def test_image_extraction_crc_mismatch_toggle():
+    """Verify image extraction behavior with enforce_crc=True vs enforce_crc=False on CRC mismatch."""
+    import pytest
+    from watermarking.embedding import embed_image_payload
+
+    # Create cover and small watermark
+    cover = np.full((160, 160, 3), 128, dtype=np.uint8)
+    wm = np.full((24, 24, 3), (200, 100, 50), dtype=np.uint8)
+
+    payload = serialize_watermark(wm, channels_used=1)
+    # Corrupt a byte in the compressed payload (index >= 32)
+    corrupted_byte = bytes([payload[35] ^ 0xFF])
+    bad_payload = payload[:35] + corrupted_byte + payload[36:]
+
+    bad_carrier, _ = embed_image_payload(cover, bad_payload, channels_used=1)
+
+    # 1. With enforce_crc=True (default), extraction must raise ValueError
+    with pytest.raises(ValueError, match="CRC32 mismatch|corrupted"):
+        extract_only(bad_carrier, enforce_crc=True)
+
+    # 2. With enforce_crc=False, extraction accepts candidate frame, returns crc_match=False
+    result = extract_only(bad_carrier, enforce_crc=False)
+    assert result["success"] is True
+    assert result["crc_match"] is False
+    assert "mismatch" in result["crc_status"].lower()
+    assert result["enforce_crc"] is False
+    assert "extracted_watermark" in result
+
+
+def test_image_extraction_severe_corruption_salvage():
+    """Verify that severe payload corruption (broken zlib stream) does not crash when enforce_crc=False."""
+    import pytest
+
+    wm = np.full((32, 32), 150, dtype=np.uint8)
+    payload = serialize_watermark(wm, channels_used=1)
+
+    # Completely corrupt the compressed bytes (index 32 onwards) with garbage
+    garbage_payload = payload[:32] + b"\xDE\xAD\xBE\xEF" * ((len(payload) - 32) // 4 + 1)
+    garbage_payload = garbage_payload[:len(payload)]
+
+    # 1. By default (enforce_crc=True), deserialize_watermark must raise ValueError
+    with pytest.raises(ValueError, match="CRC32 mismatch|corrupted"):
+        deserialize_watermark(garbage_payload)
+
+    # 2. With enforce_crc=False, deserialize_watermark must NOT crash; returns fallback visual array
+    img, meta = deserialize_watermark(garbage_payload, enforce_crc=False)
+    assert meta["crc_match"] is False
+    assert "mismatch" in meta["crc_status"].lower()
+    assert img.shape == (32, 32)
+
+
 if __name__ == "__main__":
     tests = [
         test_serialization_roundtrip_grayscale,
@@ -225,6 +276,8 @@ if __name__ == "__main__":
         test_capacity_deficit_rejection,
         test_unwatermarked_image_error,
         test_real_files_roundtrip,
+        test_image_extraction_crc_mismatch_toggle,
+        test_image_extraction_severe_corruption_salvage,
     ]
     passed = 0
     failed = 0

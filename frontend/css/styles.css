@@ -69,3 +69,46 @@
 ::-webkit-scrollbar-thumb:hover {
   background: #94a3b8;
 }
+
+/* Dynamic Progress Bar Animation & Shimmer */
+@keyframes progressShimmer {
+  0% {
+    background-position: 200% 0;
+  }
+  100% {
+    background-position: -200% 0;
+  }
+}
+
+.progress-bar-shimmer {
+  background: linear-gradient(
+    90deg,
+    #1d4ed8 0%,
+    #2563eb 20%,
+    #60a5fa 45%,
+    #93c5fd 50%,
+    #60a5fa 55%,
+    #2563eb 80%,
+    #1d4ed8 100%
+  );
+  background-size: 200% 100%;
+  animation: progressShimmer 2.2s infinite linear;
+}
+
+.progress-bar-success {
+  background: linear-gradient(
+    90deg,
+    #059669 0%,
+    #10b981 50%,
+    #34d399 100%
+  ) !important;
+  background-size: 100% 100% !important;
+  animation: none !important;
+}
+
+.progress-bar-error {
+  background: #ba1a1a !important;
+  background-size: 100% 100% !important;
+  animation: none !important;
+}
+

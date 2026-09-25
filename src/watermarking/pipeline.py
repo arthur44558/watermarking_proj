@@ -83,6 +83,7 @@ def watermark_image(
     cover_source: Union[Path, str, np.ndarray, bytes],
     watermark_source: Union[Path, str, np.ndarray, bytes],
     output_dir: Union[Path, str] = OUTPUT_DIR,
+    enforce_crc: bool = True,
 ) -> Dict[str, Any]:
     """
     Execute full JND-guided DCT image-in-image watermarking pipeline:
@@ -140,7 +141,7 @@ def watermark_image(
 
     # 6. Blind extraction verification
     extracted_payload = extract_framed_payload(watermarked_bgr)
-    reconstructed_wm, ext_meta = deserialize_watermark(extracted_payload)
+    reconstructed_wm, ext_meta = deserialize_watermark(extracted_payload, enforce_crc=enforce_crc)
 
     # 7. Compute genuine evaluation metrics
     psnr_cover = calculate_psnr(cover, watermarked_bgr)
@@ -173,6 +174,9 @@ def watermark_image(
     result = {
         "success": True,
         "mode": "embed_and_verify",
+        "crc_match": ext_meta.get("crc_match", True),
+        "crc_status": ext_meta.get("crc_status", "Passed (CRC32 Verified)"),
+        "enforce_crc": enforce_crc,
         "watermarked_image": f"/output/{watermarked_filename}",
         "extracted_watermark": f"/output/{extracted_filename}",
         "difference_image": f"/output/{diff_filename}",
@@ -193,6 +197,8 @@ def watermark_image(
             "watermark_height": int(wm_info["height"]),
             "watermark_format": wm_info["format"],
             "watermark_color_mode": wm_info["color_mode"],
+            "crc_match": ext_meta.get("crc_match", True),
+            "crc_status": ext_meta.get("crc_status", "Passed (CRC32 Verified)"),
             "raw_payload_bytes": int(wm_info["raw_bytes"]),
             "compressed_payload_bytes": int(wm_info["compressed_bytes"]),
             "total_payload_bytes": int(len(framed_payload)),
@@ -222,6 +228,7 @@ def watermark_image(
 def extract_only(
     image_source: Union[Path, str, np.ndarray, bytes],
     output_dir: Union[Path, str] = OUTPUT_DIR,
+    enforce_crc: bool = True,
 ) -> Dict[str, Any]:
     """
     Mode B: Extract watermark directly from a supplied (already-watermarked) image.
@@ -238,7 +245,7 @@ def extract_only(
     orig_h, orig_w = img.shape[:2]
 
     # Blind extraction and reconstruction
-    reconstructed_wm, meta = extract_and_reconstruct(img)
+    reconstructed_wm, meta = extract_and_reconstruct(img, enforce_crc=enforce_crc)
 
     run_id = uuid.uuid4().hex[:8]
     input_filename = f"extraction_input_{run_id}.png"
@@ -250,6 +257,9 @@ def extract_only(
     return {
         "success": True,
         "mode": "extract_only",
+        "crc_match": meta.get("crc_match", True),
+        "crc_status": meta.get("crc_status", "Passed (CRC32 Verified)"),
+        "enforce_crc": enforce_crc,
         "watermarked_image": f"/output/{input_filename}",
         "extracted_watermark": f"/output/{extracted_filename}",
         "metrics": {
@@ -267,6 +277,8 @@ def extract_only(
             "watermark_width": int(meta["width"]),
             "watermark_height": int(meta["height"]),
             "watermark_color_mode": meta["color_mode"],
+            "crc_match": meta.get("crc_match", True),
+            "crc_status": meta.get("crc_status", "Passed (CRC32 Verified)"),
             "compressed_payload_bytes": int(meta["compressed_len"]),
             "total_payload_bytes": int(meta["total_payload_bytes"]),
             "channels_used": int(meta["channels_used"]),

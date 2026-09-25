@@ -176,6 +176,9 @@ const Upload = (function () {
     if (window.Results && Results.resetResults) {
       Results.resetResults();
     }
+    if (typeof Processing !== "undefined" && Processing.resetProgress) {
+      Processing.resetProgress();
+    }
 
     if (isVideo) {
       // === VIDEO HANDLING ===
@@ -278,6 +281,9 @@ const Upload = (function () {
     // Clear stale results on input change
     if (window.Results && Results.resetResults) {
       Results.resetResults();
+    }
+    if (typeof Processing !== "undefined" && Processing.resetProgress) {
+      Processing.resetProgress();
     }
 
     const reader = new FileReader();
@@ -451,6 +457,9 @@ const Upload = (function () {
     if (carrierCapacity) carrierCapacity.textContent = "—";
     if (wmUtilization) wmUtilization.textContent = "—";
     if (wmStatusHint) wmStatusHint.textContent = "Lossless zlib payload • Multi-bit JND DCT embedding";
+    if (typeof Processing !== "undefined" && Processing.resetProgress) {
+      Processing.resetProgress();
+    }
 
     updateRunButtonState();
   }

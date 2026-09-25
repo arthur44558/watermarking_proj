@@ -271,6 +271,13 @@ const Results = (function () {
       downloadExtractedBtn.classList.add("inline-flex");
     }
 
+    // CRC verification state check
+    const ext = data.extraction || {};
+    const crcMatch = data.crc_match !== undefined ? data.crc_match : (ext.crc_match !== undefined ? ext.crc_match : true);
+    const crcStatus = data.crc_status || ext.crc_status || "";
+    const enforceCrc = data.enforce_crc !== undefined ? data.enforce_crc : (ext.enforce_crc !== undefined ? ext.enforce_crc : true);
+    const hasCrcMismatch = (crcMatch === false) || crcStatus.toLowerCase().includes("mismatch");
+
     // 4. Update UI Card Titles, Badges, and Metrics
     if (isExtractOnly) {
       if (watermarkedCardTitle) {
@@ -281,7 +288,18 @@ const Results = (function () {
         badgePsnrMini.className =
           "font-mono text-[9px] px-1.5 py-0.5 bg-secondary-container text-on-secondary-fixed font-semibold rounded";
       }
-      if (badgeBerMini) badgeBerMini.textContent = isVideo ? "Video Frame Extracted" : "Blind Extracted";
+      if (badgeBerMini) {
+        if (hasCrcMismatch) {
+          badgeBerMini.textContent = "CRC Mismatch";
+          badgeBerMini.className = "font-mono text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 font-semibold rounded";
+        } else if (!enforceCrc) {
+          badgeBerMini.textContent = "CRC Disabled";
+          badgeBerMini.className = "font-mono text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 font-semibold rounded";
+        } else {
+          badgeBerMini.textContent = isVideo ? "Video Frame Extracted" : "Blind Extracted";
+          badgeBerMini.className = "font-mono text-[9px] px-1.5 py-0.5 bg-secondary-container text-on-secondary-fixed font-semibold rounded";
+        }
+      }
       if (watermarkFidelityMetric) watermarkFidelityMetric.textContent = "PSNR: —";
       if (watermarkFidelityText) watermarkFidelityText.textContent = "No Reference Comparison";
       if (extractCorrMetric) extractCorrMetric.textContent = "NC: —";
@@ -290,15 +308,20 @@ const Results = (function () {
         const bytes = meta.compressed_payload_bytes || 0;
         extractFidelityText.textContent = `${meta.watermark_width || "—"}×${meta.watermark_height || "—"} ${meta.watermark_color_mode || ""} (${bytes.toLocaleString()} B)`;
       }
-      if (payloadMatchPill) {
-        payloadMatchPill.textContent = `${meta.watermark_width || "—"}×${meta.watermark_height || "—"} ${meta.watermark_color_mode || ""}`;
-      }
 
       if (metricPsnr) metricPsnr.textContent = "—";
       if (metricSsim) metricSsim.textContent = "—";
       if (metricAcc) metricAcc.textContent = "—";
       if (metricNc) metricNc.textContent = "—";
-      if (metricAccSub) metricAccSub.textContent = "Blind extraction (no ground truth)";
+      if (metricAccSub) {
+        if (hasCrcMismatch) {
+          metricAccSub.textContent = isVideo ? "Sampled frames (CRC Mismatch)" : "Extracted payload (CRC Mismatch)";
+        } else if (!enforceCrc) {
+          metricAccSub.textContent = isVideo ? "Sampled frames (CRC Disabled)" : "Extracted payload (CRC Disabled)";
+        } else {
+          metricAccSub.textContent = "Blind extraction (no ground truth)";
+        }
+      }
     } else {
       if (watermarkedCardTitle) {
         watermarkedCardTitle.textContent = isVideo ? "Watermarked Video" : "Watermarked Image";
@@ -308,7 +331,18 @@ const Results = (function () {
         badgePsnrMini.className =
           "font-mono text-[9px] px-1.5 py-0.5 bg-primary-fixed text-primary font-semibold rounded";
       }
-      if (badgeBerMini) badgeBerMini.textContent = isVideo ? "Multi-Frame Verified" : "Blind Extraction";
+      if (badgeBerMini) {
+        if (hasCrcMismatch) {
+          badgeBerMini.textContent = "CRC Mismatch";
+          badgeBerMini.className = "font-mono text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 font-semibold rounded";
+        } else if (!enforceCrc) {
+          badgeBerMini.textContent = "CRC Disabled";
+          badgeBerMini.className = "font-mono text-[9px] px-1.5 py-0.5 bg-amber-100 text-amber-800 border border-amber-300 font-semibold rounded";
+        } else {
+          badgeBerMini.textContent = isVideo ? "Multi-Frame Verified" : "Blind Extraction";
+          badgeBerMini.className = "font-mono text-[9px] px-1.5 py-0.5 bg-surface-container border border-slate-200 text-secondary font-semibold rounded";
+        }
+      }
 
       const metrics = data.metrics || {};
       const psnr = metrics.psnr !== undefined ? `${metrics.psnr}` : "—";
@@ -335,16 +369,43 @@ const Results = (function () {
       if (extractFidelityText) {
         extractFidelityText.textContent = `${meta.watermark_width}×${meta.watermark_height} ${meta.watermark_color_mode} (${meta.total_payload_bytes ? meta.total_payload_bytes.toLocaleString() : 0} bytes)`;
       }
-      if (payloadMatchPill) {
-        payloadMatchPill.textContent = `${meta.watermark_width}×${meta.watermark_height} (${acc})`;
-      }
 
       if (metricAccSub) {
-        if (isVideo && data.extraction) {
-          metricAccSub.textContent = `${data.extraction.valid_sampled_frames}/${data.extraction.total_sampled_frames} Sampled Frames Verified (CRC32)`;
-        } else if (meta.total_payload_bytes) {
-          metricAccSub.textContent = `${meta.total_payload_bytes.toLocaleString()} / ${meta.total_payload_bytes.toLocaleString()} bytes (CRC32 Verified)`;
+        if (hasCrcMismatch) {
+          if (isVideo && data.extraction) {
+            metricAccSub.textContent = `${data.extraction.valid_sampled_frames}/${data.extraction.total_sampled_frames} Frames (CRC Mismatch)`;
+          } else {
+            metricAccSub.textContent = `${meta.total_payload_bytes ? meta.total_payload_bytes.toLocaleString() : 0} bytes (CRC Mismatch)`;
+          }
+        } else if (!enforceCrc) {
+          if (isVideo && data.extraction) {
+            metricAccSub.textContent = `${data.extraction.valid_sampled_frames}/${data.extraction.total_sampled_frames} Frames (CRC Disabled)`;
+          } else {
+            metricAccSub.textContent = `${meta.total_payload_bytes ? meta.total_payload_bytes.toLocaleString() : 0} bytes (CRC Disabled)`;
+          }
+        } else {
+          if (isVideo && data.extraction) {
+            metricAccSub.textContent = `${data.extraction.valid_sampled_frames}/${data.extraction.total_sampled_frames} Sampled Frames Verified (CRC32)`;
+          } else if (meta.total_payload_bytes) {
+            metricAccSub.textContent = `${meta.total_payload_bytes.toLocaleString()} / ${meta.total_payload_bytes.toLocaleString()} bytes (CRC32 Verified)`;
+          }
         }
+      }
+    }
+
+    // Update Payload Match Pill with CRC resilience
+    if (payloadMatchPill) {
+      if (hasCrcMismatch) {
+        payloadMatchPill.className = "px-2 py-0.5 rounded font-semibold bg-amber-100 text-amber-800 border border-amber-300 text-[11px]";
+        payloadMatchPill.textContent = "CRC Mismatch";
+      } else if (!enforceCrc) {
+        payloadMatchPill.className = "px-2 py-0.5 rounded font-semibold bg-amber-100 text-amber-800 border border-amber-300 text-[11px]";
+        payloadMatchPill.textContent = "CRC Disabled";
+      } else {
+        payloadMatchPill.className = "px-2 py-0.5 rounded font-semibold bg-primary-fixed/60 text-primary border border-primary/20 text-[11px]";
+        payloadMatchPill.textContent = isExtractOnly
+          ? `${meta.watermark_width || "—"}×${meta.watermark_height || "—"} ${meta.watermark_color_mode || ""}`
+          : `${meta.watermark_width}×${meta.watermark_height} (${(data.metrics && data.metrics.bit_accuracy !== undefined) ? `${data.metrics.bit_accuracy}%` : "—"})`;
       }
     }
 
@@ -397,7 +458,13 @@ const Results = (function () {
       }
       if (videoCrcStatus) {
         const consistent = ext.payload_consistent ? "Consistent" : "Discrepancy";
-        videoCrcStatus.textContent = `${ext.crc_status || "Verified"} • ${consistent} (${ext.valid_sampled_frames || 0}/${ext.total_sampled_frames || 0} f)`;
+        const cStatus = ext.crc_status || (ext.crc_match === false ? "CRC Mismatch" : "Verified");
+        videoCrcStatus.textContent = `${cStatus} • ${consistent} (${ext.valid_sampled_frames || 0}/${ext.total_sampled_frames || 0} f)`;
+        if (ext.crc_match === false || (ext.crc_status && ext.crc_status.toLowerCase().includes("mismatch")) || ext.enforce_crc === false) {
+          videoCrcStatus.className = "font-semibold text-amber-700 text-[11px]";
+        } else {
+          videoCrcStatus.className = "font-semibold text-emerald-700 text-[11px]";
+        }
       }
     } else if (videoPerformanceCard) {
       videoPerformanceCard.classList.add("hidden");
@@ -451,7 +518,11 @@ const Results = (function () {
     }
 
     if (pipelineStatusBanner) {
-      pipelineStatusBanner.innerHTML = `<span class="text-error font-semibold">Error: ${errorMessage}</span>`;
+      if (errorMessage && (errorMessage.toLowerCase().includes("crc32 mismatch") || errorMessage.toLowerCase().includes("crc mismatch"))) {
+        pipelineStatusBanner.innerHTML = `<span class="text-error font-semibold">Error: CRC32 mismatch. Uncheck "Enforce CRC" to inspect candidate watermark.</span>`;
+      } else {
+        pipelineStatusBanner.innerHTML = `<span class="text-error font-semibold">Error: ${errorMessage}</span>`;
+      }
     }
   }
 
@@ -538,7 +609,14 @@ const Results = (function () {
     if (watermarkFidelityText) watermarkFidelityText.textContent = "Perceptual Invisibility";
     if (extractCorrMetric) extractCorrMetric.textContent = "NC: —";
     if (extractFidelityText) extractFidelityText.textContent = "Awaiting extraction";
-    if (payloadMatchPill) payloadMatchPill.textContent = "Standby";
+    if (payloadMatchPill) {
+      payloadMatchPill.className = "px-2 py-0.5 rounded font-semibold bg-primary-fixed/60 text-primary border border-primary/20 text-[11px]";
+      payloadMatchPill.textContent = "Standby";
+    }
+    if (videoCrcStatus) {
+      videoCrcStatus.className = "font-semibold text-emerald-700 text-[11px]";
+      videoCrcStatus.textContent = "—";
+    }
 
     if (pipelineStatusBanner) pipelineStatusBanner.textContent = "Pipeline: Standby";
     if (executionTimer) {
