@@ -49,3 +49,30 @@ Integrity mode: development
 ### Documentation Directive
 - [ ] `ARCHITECTURE.md` is generated covering components, dataflow, and API/UI specs.
 - [ ] Prominent directive included at the top instructing any AI agent to update the documentation upon making changes.
+
+## Follow-up — 2026-09-24T19:00:25Z
+
+**Task**: implement the JND_watermarking_universal_aspect_ratio_resolution_support.md file
+
+Working directory: c:/Users/ASUS/Desktop/Projects/Macro_proj
+Integrity mode: development
+
+## Requirements
+### R1. Universal Aspect Ratio & Resolution Handling
+Support universal aspect ratios (e.g. 1:1, 16:9, 9:16, 4:3, 21:9, arbitrary non-standard dimensions, and odd dimensions) for both cover media (images and video) and watermark payloads according to `JND_watermarking_universal_aspect_ratio_resolution_support.md`.
+
+### R2. Core Engine & Optimizer Integration
+Ensure the block partitioning, padding/unpadding, carrier capacity calculations, and watermark optimization adapt seamlessly to any resolution and aspect ratio without distortion or cropping.
+
+### R3. Automated Test Verification & Regression Guard
+Ensure all 32 existing tests pass, and add comprehensive unit and integration tests verifying universal aspect ratio and resolution support.
+
+### R4. Self-Updating Documentation
+Update `ARCHITECTURE.md` and `README.md` with the new capability specifications, preserving the mandatory AI directive at the top.
+
+## Acceptance Criteria
+- [ ] Universal aspect ratios and arbitrary non-multiple-of-8 resolutions embed and extract with 100% bit accuracy and CRC32 verification.
+- [ ] All existing 32 tests pass without regression.
+- [ ] `start.bat` continues to operate cleanly.
+- [ ] `ARCHITECTURE.md` is updated.
+

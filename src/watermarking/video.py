@@ -132,6 +132,12 @@ def get_video_info(video_source: Union[Path, str]) -> Dict[str, Any]:
         if not fps or np.isnan(fps) or fps <= 0:
             fps = DEFAULT_VIDEO_FPS
 
+        if width <= 0 or height <= 0:
+            ret, peek_frame = cap.read()
+            if ret and peek_frame is not None:
+                height, width = peek_frame.shape[:2]
+                cap.set(cv2.CAP_PROP_POS_FRAMES, 0)
+
         frame_count = int(cap.get(cv2.CAP_PROP_FRAME_COUNT))
         if frame_count <= 0:
             # If header does not specify frame count, count frames without loading all into memory
@@ -167,6 +173,7 @@ def calculate_video_carrier_capacity(video_source: Union[Path, str]) -> Dict[str
     """
     Inspect the first frame of a video to calculate its exact carrier capacity per frame.
     Does not load the complete video into memory.
+    Dynamically computes per-frame and total video capacity based on actual dimensions.
     """
     path_str = str(video_source)
     cap = cv2.VideoCapture(path_str)
@@ -186,8 +193,15 @@ def calculate_video_carrier_capacity(video_source: Union[Path, str]) -> Dict[str
         if not ret or first_frame is None:
             raise ValueError(f"Could not read the first frame from video: {path_str}")
 
+        real_h, real_w = first_frame.shape[:2]
+        if width <= 0 or height <= 0:
+            width = real_w
+            height = real_h
+
         cap_info = calculate_carrier_capacity(first_frame)
         cap_info["is_video"] = True
+        cap_info["capacity_per_frame_bytes"] = cap_info["usable_y_capacity_bytes"]
+        cap_info["total_video_capacity_bytes"] = cap_info["usable_y_capacity_bytes"] * max(1, frame_count)
         cap_info["video_info"] = {
             "width": width,
             "height": height,
@@ -207,38 +221,51 @@ def create_video_writer(
     fps: float,
 ) -> Tuple[cv2.VideoWriter, Path, str]:
     """
-    Create a cv2.VideoWriter using a codec supported by the local OpenCV/FFmpeg installation.
-    Tests standard browser-compatible container/codec candidates in sequence:
-      1. ('mp4v', '.mp4') - Standard MPEG-4 Part 2 in MP4
-      2. ('avc1', '.mp4') - H.264/AVC in MP4
-      3. ('H264', '.mp4') - OpenH264 / FFmpeg H.264
-      4. ('XVID', '.avi') - Xvid MPEG-4 in AVI
-      5. ('MJPG', '.avi') - Motion JPEG in AVI
-
-    Returns:
-        (writer, actual_output_path, codec_name)
+    Create a cv2.VideoWriter preserving the exact width and height of the input.
+    Dynamically tests browser and system compatible codec candidates.
+    Supports arbitrary aspect ratios and resolutions, including odd (non-even) dimensions.
     """
     output_base = Path(output_base_path)
     output_dir = output_base.parent
     output_dir.mkdir(parents=True, exist_ok=True)
     stem = output_base.stem
 
-    candidates = [
-        ("FFV1", ".avi", "FFV1 (Lossless AVI)"),
-        ("HFYU", ".avi", "Huffman YUV (Lossless AVI)"),
-        ("RGBA", ".avi", "Raw RGBA (Lossless AVI)"),
-        ("mp4v", ".mp4", "mp4v"),
-        ("avc1", ".mp4", "avc1"),
-        ("H264", ".mp4", "H264"),
-        ("XVID", ".avi", "XVID"),
-        ("MJPG", ".avi", "MJPG"),
-    ]
+    is_odd = (width % 2 != 0) or (height % 2 != 0)
 
-    for fourcc_code, ext, codec_name in candidates:
+    # When dimensions are odd, many FFmpeg/AVI encoders truncate width or height to even (e.g. 1279x719 -> 1278x718).
+    # On Windows, Media Foundation (MSMF) supports exact odd dimensions for MP4.
+    if is_odd:
+        candidates = [
+            (cv2.CAP_ANY, "FFV1", ".avi", "FFV1 (Lossless AVI)"),
+            (cv2.CAP_ANY, "HFYU", ".avi", "Huffman YUV (Lossless AVI)"),
+            (cv2.CAP_ANY, "RGBA", ".avi", "Raw RGBA (Lossless AVI)"),
+            (getattr(cv2, "CAP_MSMF", cv2.CAP_ANY), "mp4v", ".mp4", "mp4v (MSMF)"),
+            (getattr(cv2, "CAP_MSMF", cv2.CAP_ANY), "avc1", ".mp4", "avc1 (MSMF)"),
+            (cv2.CAP_ANY, "avc1", ".mp4", "avc1"),
+            (cv2.CAP_ANY, "mp4v", ".mp4", "mp4v"),
+            (cv2.CAP_ANY, "MJPG", ".avi", "MJPG"),
+            (cv2.CAP_ANY, "XVID", ".avi", "XVID"),
+        ]
+    else:
+        candidates = [
+            (cv2.CAP_ANY, "FFV1", ".avi", "FFV1 (Lossless AVI)"),
+            (cv2.CAP_ANY, "HFYU", ".avi", "Huffman YUV (Lossless AVI)"),
+            (cv2.CAP_ANY, "RGBA", ".avi", "Raw RGBA (Lossless AVI)"),
+            (cv2.CAP_ANY, "mp4v", ".mp4", "mp4v"),
+            (cv2.CAP_ANY, "avc1", ".mp4", "avc1"),
+            (cv2.CAP_ANY, "H264", ".mp4", "H264"),
+            (cv2.CAP_ANY, "XVID", ".avi", "XVID"),
+            (cv2.CAP_ANY, "MJPG", ".avi", "MJPG"),
+        ]
+
+    for api_pref, fourcc_code, ext, codec_name in candidates:
         target_path = output_dir / f"{stem}{ext}"
         try:
             fourcc = cv2.VideoWriter_fourcc(*fourcc_code)
-            writer = cv2.VideoWriter(str(target_path), fourcc, fps, (width, height))
+            if api_pref == cv2.CAP_ANY:
+                writer = cv2.VideoWriter(str(target_path), fourcc, fps, (width, height))
+            else:
+                writer = cv2.VideoWriter(str(target_path), api_pref, fourcc, fps, (width, height))
             if writer.isOpened():
                 return writer, target_path, codec_name
             writer.release()
@@ -251,8 +278,7 @@ def create_video_writer(
             continue
 
     raise RuntimeError(
-        "Could not initialize a supported video codec for VideoWriter on this system. "
-        "Tested: FFV1, HFYU, RGBA, mp4v, avc1, H264, XVID, MJPG."
+        f"Could not initialize a supported video codec for VideoWriter on this system for dimensions {width}x{height}."
     )
 
 
@@ -792,6 +818,7 @@ def watermark_video(
     if actual_output_file.suffix.lower() == ".avi" and shutil.which("ffmpeg"):
         mp4_target = actual_output_file.with_suffix(".mp4")
         try:
+            pix_fmt = ["-pix_fmt", "yuv444p"] if (width % 2 != 0 or height % 2 != 0) else []
             cmd = [
                 "ffmpeg",
                 "-y",
@@ -799,6 +826,7 @@ def watermark_video(
                 "-c:v", "libx264",
                 "-crf", "0",
                 "-preset", "ultrafast",
+                *pix_fmt,
                 str(mp4_target),
             ]
             proc = subprocess.run(

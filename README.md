@@ -7,7 +7,8 @@
 > Detailed architecture, mathematical formulations, data flows, and component specs are documented in [**`ARCHITECTURE.md`**](ARCHITECTURE.md).
 
 An imperceptible, robust, and blind media watermarking system based on 2D Discrete Cosine Transform (DCT) and activity-based Just Noticeable Difference (JND) perceptual masking. Supports:
-- **Arbitrary Image Watermarking**: Arbitrary cover dimensions and watermark images (PNG, JPG, WebP; Grayscale or RGB; up to 1920×1200, 1 MiB envelope) with 100% blind reconstruction.
+- **Universal Aspect Ratio & Resolution Support**: Full dynamic adaptation for arbitrary cover dimensions and aspect ratios (16:9, 9:16 portrait, 1:1, 4:3, 21:9 ultrawide, odd/non-multiple-of-8 like 1279×719) with strict output dimension preservation and zero stretching or letterboxing.
+- **Arbitrary Image Watermarking**: Arbitrary cover dimensions and watermark images (PNG, JPG, WebP; Grayscale or RGB; up to 1920×1200, 1 MiB envelope) with 100% blind reconstruction and aspect-ratio-preserving proportional downscaling.
 - **Fastest Memory-Safe Video Watermarking**: Frame-by-frame processing of MP4/AVI/MOV/WEBM video streams without uncontrolled memory usage, bounded multithreaded worker pools, and multi-frame sampling extraction with CRC32 verification.
 
 ---
@@ -81,7 +82,9 @@ Macro_proj/
 │   ├── test_embedding_robustness.py           # Randomized multi-trial bit recovery and CRC32 tests
 │   ├── test_watermark_optimizer.py            # Watermark optimization & downscaling tests
 │   ├── test_web_api.py                        # Integration tests for Flask API routes
-│   └── test_video_watermarking.py             # Video processing, bounded queues, multi-frame extraction tests
+│   ├── test_video_watermarking.py             # Video processing, bounded queues, multi-frame extraction tests
+│   └── test_universal_aspect_ratio_resolution.py # Universal aspect ratio, arbitrary dimension & metric isolation tests
+├── JND_watermarking_universal_aspect_ratio_resolution_support.md # Specification for Universal Aspect Ratio & Resolution Support
 ├── JND_video_stage1_fastest_implementation.md # Technical specification for Stage 1 video baseline
 ├── requirements.txt            # Python dependencies (numpy, opencv, scikit-image, scipy, flask)
 ├── start.bat                   # 1-click batch launcher
@@ -227,7 +230,7 @@ The decoder blindly reads the 24-byte header, determines total compressed bytes 
 
 ---
 
-## 5. Automated Test Suite (32/32 Passing)
+## 5. Automated Test Suite
 
 ```powershell
 .venv\Scripts\python.exe -m pytest -v
@@ -238,4 +241,5 @@ The decoder blindly reads the 24-byte header, determines total compressed bytes 
 3. **`tests/test_watermark_optimizer.py`** (5 tests): Dynamic downscaling, WebP/raw compression, quality search.
 4. **`tests/test_web_api.py`** (4 tests): Flask HTTP routes (`/api/capacity`, `/api/watermark`, `/api/config`).
 5. **`tests/test_video_watermarking.py`** (8 tests): Sequential/threaded frame streaming, memory stability (RSS bounded), multi-frame CRC32 verification, benchmark utilities, and web video API endpoints.
+6. **`tests/test_universal_aspect_ratio_resolution.py`**: Comprehensive verification of Universal Aspect Ratio & Resolution Support covering 16:9, 9:16 portrait, 1:1, 4:3, 21:9 ultrawide, odd/non-multiple-of-8 (e.g. 1279×719, 501×333, 243×163) images and videos, watermark proportional aspect-ratio downscaling, and boundary padding isolation.
 

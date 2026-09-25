@@ -56,8 +56,9 @@ CODEC_JPEG = 2        # JPEG lossy encoding
 
 # Watermark payload constraints
 MAX_PAYLOAD_BYTES = 1048576  # 1 MiB (1,048,576 bytes)
-MAX_WATERMARK_WIDTH = 1920
-MAX_WATERMARK_HEIGHT = 1200
+MAX_WATERMARK_DIM = 3840
+MAX_WATERMARK_WIDTH = 3840
+MAX_WATERMARK_HEIGHT = 3840
 SUPPORTED_IMAGE_FORMATS = {".png", ".jpg", ".jpeg", ".webp", ".bmp"}
 SUPPORTED_VIDEO_FORMATS = {".mp4", ".avi", ".mov", ".mkv", ".webm"}
 

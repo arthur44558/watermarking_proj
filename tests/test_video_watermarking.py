@@ -49,12 +49,25 @@ def generate_synthetic_video(
     Uses candidate codecs (mp4v -> MJPG) supported by the environment.
     """
     output_path.parent.mkdir(parents=True, exist_ok=True)
-    fourcc = cv2.VideoWriter_fourcc(*"mp4v")
-    writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
-    if not writer.isOpened():
-        output_path = output_path.with_suffix(".avi")
-        fourcc = cv2.VideoWriter_fourcc(*"MJPG")
-        writer = cv2.VideoWriter(str(output_path), fourcc, fps, (width, height))
+    writer = None
+    actual_path = output_path
+    codecs_to_try = [
+        ("FFV1", ".avi"),
+        ("mp4v", ".mp4"),
+        ("MJPG", ".avi"),
+        ("XVID", ".avi"),
+    ]
+    for c_code, c_ext in codecs_to_try:
+        cand_path = output_path.with_suffix(c_ext)
+        fourcc = cv2.VideoWriter_fourcc(*c_code)
+        cand_writer = cv2.VideoWriter(str(cand_path), fourcc, fps, (width, height))
+        if cand_writer.isOpened():
+            writer = cand_writer
+            actual_path = cand_path
+            break
+
+    if writer is None or not writer.isOpened():
+        raise RuntimeError(f"Could not initialize VideoWriter for synthetic video {width}x{height}")
 
     np.random.seed(42)
     for i in range(num_frames):
@@ -68,7 +81,7 @@ def generate_synthetic_video(
         writer.write(frame)
 
     writer.release()
-    return output_path
+    return actual_path
 
 
 def create_synthetic_watermark(width: int = 40, height: int = 24) -> np.ndarray:
